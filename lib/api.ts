@@ -41,7 +41,13 @@ export interface ReportMessage {
   conversationId: string
 }
 
-export type ReportStatus = 'PENDING' | 'REVIEWED' | 'RESOLVED_REMOVED' | 'RESOLVED_INVALID'
+export type ReportStatus =
+  | 'PENDING'
+  | 'REVIEWED'
+  | 'RESOLVED_REMOVED'
+  | 'RESOLVED_INVALID'
+  | 'RESOLVED_SUSPENDED'
+  | 'RESOLVED_BANNED'
 
 export interface Report {
   id: string
@@ -155,4 +161,23 @@ export function removeReportTarget(token: string, id: string): Promise<Report | 
 
 export function deleteReport(token: string, id: string): Promise<null> {
   return request<null>(`/reports/${id}`, { token, method: 'DELETE' })
+}
+
+// ─── Moderação de usuário ───────────────────────────────────────────────────
+
+export interface ModerateUserBody {
+  action: 'SUSPEND' | 'BAN'
+  days?: number
+  reason?: string
+}
+
+// Suspende (com prazo) ou bane (permanente) o usuário alvo da denúncia e a
+// resolve (RESOLVED_SUSPENDED / RESOLVED_BANNED).
+export function moderateUser(token: string, reportId: string, body: ModerateUserBody): Promise<Report> {
+  return request<Report>(`/reports/${reportId}/moderate-user`, { token, method: 'POST', body })
+}
+
+// Levanta a punição (suspensão ou banimento) de um usuário.
+export function unsuspendUser(token: string, userId: string): Promise<User> {
+  return request<User>(`/moderation/users/${userId}/unsuspend`, { token, method: 'POST' })
 }

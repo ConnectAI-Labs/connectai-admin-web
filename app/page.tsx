@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { LogOut, RefreshCw, X, AlertTriangle, Trash2 } from 'lucide-react'
+import { LogOut, RefreshCw, X, AlertTriangle, Trash2, Ban, Clock, ShieldCheck } from 'lucide-react'
 import * as api from '@/lib/api'
 import type { Report, ReportStatus, ReportFilters, UpdateReportBody } from '@/lib/api'
 
@@ -23,6 +23,8 @@ const STATUS_OPTIONS = [
   { value: 'REVIEWED', label: 'Em revisão' },
   { value: 'RESOLVED_REMOVED', label: 'Resolvido — removido' },
   { value: 'RESOLVED_INVALID', label: 'Resolvido — inválido' },
+  { value: 'RESOLVED_SUSPENDED', label: 'Resolvido — suspenso' },
+  { value: 'RESOLVED_BANNED', label: 'Resolvido — banido' },
 ]
 
 const REASON_OPTIONS = [
@@ -48,6 +50,8 @@ const STATUS_LABEL: Record<string, string> = {
   REVIEWED: 'Em revisão',
   RESOLVED_REMOVED: 'Removido',
   RESOLVED_INVALID: 'Inválido',
+  RESOLVED_SUSPENDED: 'Suspenso',
+  RESOLVED_BANNED: 'Banido',
 }
 
 const STATUS_CLASS: Record<string, string> = {
@@ -55,6 +59,8 @@ const STATUS_CLASS: Record<string, string> = {
   REVIEWED: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
   RESOLVED_REMOVED: 'bg-red-500/10 text-red-400 border border-red-500/20',
   RESOLVED_INVALID: 'bg-zinc-700/60 text-zinc-400 border border-zinc-600/30',
+  RESOLVED_SUSPENDED: 'bg-orange-500/10 text-orange-400 border border-orange-500/20',
+  RESOLVED_BANNED: 'bg-red-600/15 text-red-300 border border-red-600/30',
 }
 
 const TARGET_LABEL: Record<string, string> = {
@@ -266,6 +272,122 @@ function ConfirmModal({ title, description, confirmLabel, danger = false, onConf
   )
 }
 
+// ─── ModerateUserModal ───────────────────────────────────────────────────────
+
+interface ModerateUserModalProps {
+  mode: 'SUSPEND' | 'BAN'
+  targetName: string
+  pending: boolean
+  onConfirm: (data: { days?: number; reason: string }) => void
+  onCancel: () => void
+}
+
+function ModerateUserModal({ mode, targetName, pending, onConfirm, onCancel }: ModerateUserModalProps) {
+  const isBan = mode === 'BAN'
+  const [days, setDays] = useState(7)
+  const [reason, setReason] = useState('')
+  const [ack, setAck] = useState(false)
+
+  // Ban exige motivo + confirmação reforçada; suspensão exige só prazo válido.
+  const canConfirm = isBan
+    ? reason.trim().length > 0 && ack && !pending
+    : days >= 1 && days <= 3650 && !pending
+
+  function submit() {
+    if (!canConfirm) return
+    onConfirm(isBan ? { reason: reason.trim() } : { days, reason: reason.trim() })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative z-10 bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="flex items-start justify-between mb-1">
+          <h3 className="text-white font-semibold text-base">
+            {isBan ? 'Banir usuário' : 'Suspender usuário'}
+          </h3>
+          <button onClick={onCancel} className="text-zinc-400 hover:text-white transition-colors ml-3">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-zinc-400 text-sm mb-4">
+          {isBan
+            ? `${targetName} perderá o acesso permanentemente.`
+            : `${targetName} ficará sem acesso pelo período definido.`}
+        </p>
+
+        {!isBan && (
+          <div className="mb-4">
+            <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium mb-2">Prazo</p>
+            <div className="flex gap-2 mb-2">
+              {[7, 30, 90].map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDays(d)}
+                  className={`flex-1 h-9 rounded-lg text-sm transition-colors border ${days === d
+                    ? 'bg-violet-600 border-violet-600 text-white'
+                    : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}
+                >
+                  {d}d
+                </button>
+              ))}
+            </div>
+            <input
+              type="number"
+              min={1}
+              max={3650}
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm
+                         focus:outline-none focus:border-violet-500 transition-colors"
+            />
+          </div>
+        )}
+
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder={isBan ? 'Motivo (obrigatório)' : 'Motivo (recomendado)'}
+          rows={3}
+          className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm
+                     placeholder-zinc-500 resize-none focus:outline-none focus:border-violet-500 transition-colors mb-4"
+        />
+
+        {isBan && (
+          <label className="flex items-start gap-2 mb-4 text-sm text-zinc-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={ack}
+              onChange={(e) => setAck(e.target.checked)}
+              className="mt-0.5 accent-red-600"
+            />
+            Entendo que o banimento é permanente.
+          </label>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            className="flex-1 h-9 rounded-lg border border-zinc-700 text-zinc-300 text-sm hover:bg-zinc-800 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={submit}
+            disabled={!canConfirm}
+            className={`flex-1 h-9 rounded-lg text-white text-sm font-semibold transition-colors flex items-center justify-center
+                        disabled:opacity-50 disabled:cursor-not-allowed ${isBan
+              ? 'bg-red-600 hover:bg-red-500'
+              : 'bg-orange-600 hover:bg-orange-500'}`}
+          >
+            {pending ? <Spinner /> : isBan ? 'Banir' : 'Suspender'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── ReportRow ────────────────────────────────────────────────────────────────
 
 interface ReportRowProps {
@@ -375,7 +497,9 @@ function ReportDetail({ reportId, token, onBack, onUpdated }: ReportDetailProps)
   const [saving, setSaving] = useState(false)
   const [newStatus, setNewStatus] = useState<ReportStatus | ''>('')
   const [note, setNote] = useState('')
-  const [modal, setModal] = useState<'remove' | 'delete' | null>(null)
+  const [modal, setModal] = useState<
+    'remove' | 'delete' | 'suspend' | 'ban' | 'unsuspend' | null
+  >(null)
 
   useEffect(() => {
     setLoading(true)
@@ -436,6 +560,51 @@ function ReportDetail({ reportId, token, onBack, onUpdated }: ReportDetailProps)
     }
   }
 
+  async function handleModerate(
+    action: 'SUSPEND' | 'BAN',
+    data: { days?: number; reason: string },
+  ) {
+    if (!report) return
+    setSaving(true)
+    setError('')
+    try {
+      await api.moderateUser(token, report.id, {
+        action,
+        days: data.days,
+        reason: data.reason || undefined,
+      })
+      const updated = await api.getReport(token, report.id)
+      setReport(updated)
+      onUpdated()
+    } catch (err) {
+      setError(
+        err instanceof api.ApiError ? err.message : 'Falha ao aplicar a punição.',
+      )
+    } finally {
+      setSaving(false)
+      setModal(null)
+    }
+  }
+
+  async function handleUnsuspend() {
+    if (!report?.targetUserId) return
+    setSaving(true)
+    setError('')
+    try {
+      await api.unsuspendUser(token, report.targetUserId)
+      const updated = await api.getReport(token, report.id)
+      setReport(updated)
+      onUpdated()
+    } catch (err) {
+      setError(
+        err instanceof api.ApiError ? err.message : 'Falha ao reverter a punição.',
+      )
+    } finally {
+      setSaving(false)
+      setModal(null)
+    }
+  }
+
   if (loading) return (
     <div className="flex-1 flex items-center justify-center">
       <Spinner />
@@ -447,6 +616,12 @@ function ReportDetail({ reportId, token, onBack, onUpdated }: ReportDetailProps)
   )
 
   const targetType = getTargetType(report)
+  const targetName = report.targetUser
+    ? `@${report.targetUser.username}`
+    : 'o usuário'
+  const isPunished =
+    report.status === 'RESOLVED_SUSPENDED' ||
+    report.status === 'RESOLVED_BANNED'
 
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full">
@@ -509,7 +684,12 @@ function ReportDetail({ reportId, token, onBack, onUpdated }: ReportDetailProps)
         <Select
           value={newStatus}
           onChange={(v) => setNewStatus(v as ReportStatus)}
-          options={STATUS_OPTIONS.filter((o) => o.value !== '')}
+          options={STATUS_OPTIONS.filter(
+            (o) =>
+              o.value !== '' &&
+              o.value !== 'RESOLVED_SUSPENDED' &&
+              o.value !== 'RESOLVED_BANNED',
+          )}
         />
         <textarea
           value={note}
@@ -528,14 +708,43 @@ function ReportDetail({ reportId, token, onBack, onUpdated }: ReportDetailProps)
         </button>
       </div>
 
-      <div className="flex gap-3">
-        <button
-          onClick={() => setModal('remove')}
-          className="flex items-center gap-2 h-9 px-4 rounded-lg border border-amber-500/30 text-amber-400
-                     hover:bg-amber-500/10 text-sm transition-colors"
-        >
-          <X size={14} /> Remover alvo
-        </button>
+      <div className="flex flex-wrap gap-3">
+        {targetType === 'USER' ? (
+          isPunished ? (
+            <button
+              onClick={() => setModal('unsuspend')}
+              className="flex items-center gap-2 h-9 px-4 rounded-lg border border-emerald-500/30 text-emerald-400
+                         hover:bg-emerald-500/10 text-sm transition-colors"
+            >
+              <ShieldCheck size={14} /> Reverter punição
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => setModal('suspend')}
+                className="flex items-center gap-2 h-9 px-4 rounded-lg border border-orange-500/30 text-orange-400
+                           hover:bg-orange-500/10 text-sm transition-colors"
+              >
+                <Clock size={14} /> Suspender
+              </button>
+              <button
+                onClick={() => setModal('ban')}
+                className="flex items-center gap-2 h-9 px-4 rounded-lg border border-red-500/30 text-red-400
+                           hover:bg-red-500/10 text-sm transition-colors"
+              >
+                <Ban size={14} /> Banir
+              </button>
+            </>
+          )
+        ) : (
+          <button
+            onClick={() => setModal('remove')}
+            className="flex items-center gap-2 h-9 px-4 rounded-lg border border-amber-500/30 text-amber-400
+                       hover:bg-amber-500/10 text-sm transition-colors"
+          >
+            <X size={14} /> Remover alvo
+          </button>
+        )}
         <button
           onClick={() => setModal('delete')}
           className="flex items-center gap-2 h-9 px-4 rounded-lg border border-red-500/30 text-red-400
@@ -562,6 +771,26 @@ function ReportDetail({ reportId, token, onBack, onUpdated }: ReportDetailProps)
           confirmLabel="Excluir"
           danger
           onConfirm={handleDelete}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {(modal === 'suspend' || modal === 'ban') && (
+        <ModerateUserModal
+          mode={modal === 'ban' ? 'BAN' : 'SUSPEND'}
+          targetName={targetName}
+          pending={saving}
+          onConfirm={(data) =>
+            handleModerate(modal === 'ban' ? 'BAN' : 'SUSPEND', data)
+          }
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'unsuspend' && (
+        <ConfirmModal
+          title="Reverter punição"
+          description={`A punição de ${targetName} será levantada — a conta volta a ter acesso. Vale para o usuário, não só para este tíquete.`}
+          confirmLabel="Reverter"
+          onConfirm={handleUnsuspend}
           onCancel={() => setModal(null)}
         />
       )}
