@@ -1,129 +1,121 @@
-# Conectaí — Painel Administrativo Web
+# Conectaí Admin Web
 
-Painel de moderação e administração da plataforma **Conectaí**, desenvolvido como parte do TCC de Engenharia de Software / Engenharia da Computação da **Universidade Positivo** (2025).
+Painel administrativo de moderação do aplicativo **Conectaí**, desenvolvido como parte do Trabalho de Conclusão de Curso (TCC).
 
-## Contexto no TCC
-
-Este repositório implementa os seguintes requisitos do documento de especificação técnica:
-
-| Requisito | Descrição | Status |
-|-----------|-----------|--------|
-| UC004 | Gerenciar Conteúdo Denunciado (Moderador) | ✅ Implementado |
-| UC005 | Denunciar Conteúdo (consumido via backend) | ✅ Suportado |
-| RF — Painel Admin | Login com role ADMIN, fila de denúncias, ações de moderação | ✅ Implementado |
-| UC004 A-1 | Remover Conteúdo e Suspender Conta | 🔜 Aguarda endpoint backend |
-| UC004 A-2 | Remover Conteúdo e Banir Permanentemente | 🔜 Aguarda endpoint backend |
-| Sidebar Usuários | Listagem e gestão de usuários | 🔜 Próxima fase |
-| Sidebar Eventos | Listagem e remoção forçada de eventos | 🔜 Próxima fase |
-| Sidebar Auditoria | Histórico de ações LGPD (`/consent/audit`) | 🔜 Próxima fase |
+---
 
 ## Stack
 
-- **React 19** + **Vite 8**
-- **Lucide React** — ícones
-- **CSS puro** — sem framework de UI (design próprio)
-- Sem dependências de estado externo (hooks nativos: `useState`, `useEffect`, `useMemo`, `useCallback`)
+| Camada | Tecnologia |
+|---|---|
+| Framework | Next.js 15 (App Router) |
+| Linguagem | TypeScript 5 |
+| Estilização | Tailwind CSS v3 |
+| Ícones | lucide-react |
+| Runtime | Node.js 20+ |
+
+> Stack definida pelo TCC: React + Next.js + TypeScript + Tailwind CSS (seção de requisitos de tecnologia).
+
+---
 
 ## Estrutura
 
 ```
-src/
-├── api.js          # Camada de requisições HTTP (fetch + ApiError)
-├── App.jsx         # Componente raiz + todas as telas (arquivo único por simplicidade)
-├── App.css         # Estilos do painel
-├── index.css       # Reset e variáveis globais
-└── main.jsx        # Entry point React
+connectai-admin-web/
+├── app/
+│   ├── layout.tsx       # RootLayout com metadados e globals.css
+│   ├── page.tsx         # Aplicação completa (SPA via 'use client')
+│   └── globals.css      # Tailwind directives + gradiente de fundo
+├── lib/
+│   └── api.ts           # Cliente HTTP tipado (tipos + funções de API)
+├── next.config.ts
+├── tailwind.config.ts
+├── postcss.config.mjs
+└── tsconfig.json
 ```
 
-## Funcionalidades implementadas
+### Arquitetura de camadas
 
-### Login
-- Autenticação via `/auth/login` do backend
-- Validação de `role === 'ADMIN'` após login (via `/users/me`)
-- Sessão persistida em `localStorage`
-- Logout limpa token e redireciona para login
+```
+Tela (page.tsx) → hook/callback → service (lib/api.ts) → HTTP
+```
 
-### Módulo de Denúncias (UC004 / UC005)
-- **Métricas**: cards de contagem por status (Pendente, Revisada, Removida, Improcedente)
-- **Fila paginada**: tabela com status, motivo, tipo do alvo, denunciante e data
-- **Filtros**: por status, motivo da denúncia, tipo do alvo e limite por página
-- **Detalhe**: painel lateral com alvo completo (evento, comentário, mensagem ou usuário)
-- **Ações de moderação**:
-  - Marcar como Revisada → `PATCH /reports/:id` `{ status: "REVIEWED" }`
-  - Resolver como Improcedente → `PATCH /reports/:id` `{ status: "RESOLVED_INVALID" }`
-  - Resolver como Removida → `PATCH /reports/:id` `{ status: "RESOLVED_REMOVED" }`
-  - Remover conteúdo denunciado → `DELETE /reports/:id/target`
-  - Excluir denúncia → `DELETE /reports/:id`
-- **Modal de confirmação** para ações destrutivas
+Nenhuma chamada HTTP é feita diretamente em componentes — toda comunicação com o backend passa por `lib/api.ts`.
 
-### Sidebar
-| Seção | Status | Notas |
-|-------|--------|-------|
-| Denúncias | ✅ Ativo | Implementado |
-| Usuários | 🔒 Fase futura | Requer `PATCH /admin/users/:id/suspend` no backend |
-| Eventos | 🔒 Fase futura | Requer `GET /admin/events` e `DELETE /admin/events/:id` |
-| Auditoria | 🔒 Fase futura | Consome `GET /consent/audit` (endpoint existe, precisa de acesso admin) |
+---
+
+## Referência ao TCC
+
+### UC004 — Moderação de conteúdo (RF10, RF11)
+- **Tela de denúncias**: listagem com filtros por status, motivo e tipo de alvo ✅
+- **Detalhe de denúncia**: visualização completa + atualização de status + nota de resolução ✅
+- **Remoção de alvo**: `DELETE /reports/:id/target` ✅
+- **Exclusão de denúncia**: `DELETE /reports/:id` ✅
+- **A-1 Suspensão temporária**: aguarda endpoint `PATCH /admin/users/:id/suspend` no backend ⏳
+- **A-2 Banimento permanente**: aguarda endpoint `PATCH /admin/users/:id/ban` no backend ⏳
+
+### UC005 — Denúncia de conteúdo (RF09)
+Fluxo iniciado pelo usuário no app mobile. O backend recebe e persiste (`POST /reports`). O painel exibe as denúncias resultantes via `GET /reports`.
+
+---
+
+## Endpoints consumidos
+
+| Método | Rota | Função |
+|---|---|---|
+| POST | `/auth/login` | Autenticação do admin |
+| GET | `/users/me` | Verifica identidade do token |
+| GET | `/reports` | Lista denúncias (filtros + paginação por cursor) |
+| GET | `/reports/:id` | Detalhe de uma denúncia |
+| PATCH | `/reports/:id` | Atualiza status e nota de resolução |
+| DELETE | `/reports/:id/target` | Remove o conteúdo denunciado |
+| DELETE | `/reports/:id` | Exclui a denúncia |
+
+---
+
+## Endpoints pendentes no backend
+
+Estes endpoints precisam ser criados na branch `feat/admin-moderation-actions` do backend:
+
+| Método | Rota | Descrição |
+|---|---|---|
+| PATCH | `/admin/users/:id/suspend` | Suspensão temporária (UC004 A-1) |
+| PATCH | `/admin/users/:id/ban` | Banimento permanente (UC004 A-2) |
+| GET | `/admin/events` | Listagem de eventos para moderação |
+| DELETE | `/admin/events/:id` | Remoção de evento por admin |
+| GET | `/admin/consent/audit` | Auditoria global de consentimento (RF11) |
+
+---
 
 ## Configuração
 
 ### Variáveis de ambiente
 
+Crie `.env.local` na raiz:
+
 ```env
-# .env.local
-VITE_API_URL=http://localhost:3333
+NEXT_PUBLIC_API_URL=http://localhost:3333
 ```
 
-Por padrão aponta para `http://localhost:3333` (backend local).
+Em produção, aponte para a URL do backend implantado.
 
-### Instalação e execução
+### Instalar e rodar
 
 ```bash
 npm install
-npm run dev
+npm run dev      # http://localhost:3000
+npm run build    # build de produção
+npm run start    # servir build de produção
 ```
 
-Acesse `http://localhost:5173` e faça login com uma conta que tenha `role: ADMIN` no banco.
+---
 
-### Build de produção
+## Credenciais de acesso
 
-```bash
-npm run build
-# Saída em dist/
-```
+O login utiliza as credenciais de um usuário com role `ADMIN` cadastrado no banco do backend. Não há cadastro pelo painel — o admin é criado diretamente via seed ou migration no backend.
 
-## Endpoints consumidos
+---
 
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| POST | `/auth/login` | Autenticação |
-| GET | `/users/me` | Validação de role ADMIN |
-| GET | `/reports` | Listagem com filtros e paginação |
-| GET | `/reports/:id` | Detalhe com relações (evento, comentário, etc.) |
-| PATCH | `/reports/:id` | Atualizar status e nota de resolução |
-| DELETE | `/reports/:id/target` | Remover conteúdo denunciado |
-| DELETE | `/reports/:id` | Excluir denúncia |
+## Autenticação
 
-## Relação com outros repositórios
-
-| Repositório | Branch relevante |
-|-------------|-----------------|
-| `connectai-backend` | `main` — fornece todos os endpoints consumidos |
-| `connectai-mobile` | `main` — app mobile que gera as denúncias |
-
-## Próximos passos (pendentes no backend)
-
-Para habilitar as seções Usuários e Auditoria completa, o backend precisa de:
-
-```
-PATCH /admin/users/:id/suspend   → { type: "suspend"|"ban", durationDays?: number }
-GET   /admin/events              → listagem admin (sem filtro de autor)
-DELETE /admin/events/:id         → remoção forçada por admin
-GET   /admin/consent/audit       → audit LGPD com filtro por userId (acesso admin)
-```
-
-## Autores
-
-Gabriel Dias Peixoto · Gabriel Leineker Wolff · Hendrew Gustavo Carvalho dos Santos  
-João Adolfo Bonato Maldonado · Vinicius Stadler Ferreira · **Vitor Henrique Camillo**
-
-Orientador: Prof. Josemar Luís Felix — Universidade Positivo, 2025
+O token JWT retornado pelo login é armazenado em `localStorage` (`admin_token`) e enviado como `Authorization: Bearer <token>` em todas as requisições. O `'use client'` no `page.tsx` permite o uso de `localStorage` dentro do Next.js App Router.
