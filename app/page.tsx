@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { LogOut, RefreshCw, X, AlertTriangle, Trash2 } from 'lucide-react'
+import { LogOut, RefreshCw, X, AlertTriangle, Trash2, ShieldCheck, KeyRound, Copy, ArrowLeft } from 'lucide-react'
 import * as api from '@/lib/api'
 import type { Report, ReportStatus, ReportFilters, UpdateReportBody } from '@/lib/api'
 
@@ -132,26 +132,120 @@ interface LoginScreenProps {
   onLogin: (token: string) => void
 }
 
+// Passos do login. A decisão de exigir MFA vem do backend; aqui só reagimos:
+//  credentials → (token) entra | (mfaRequired) challenge | (mfaSetupRequired) enroll
+type LoginStep = 'credentials' | 'challenge' | 'enroll'
+
+const inputClass =
+  'w-full h-10 px-3 rounded-lg bg-zinc-800 border border-zinc-700 text-white text-sm ' +
+  'placeholder-zinc-500 focus:outline-none focus:border-violet-500 transition-colors'
+
 function LoginScreen({ onLogin }: LoginScreenProps) {
+  const [step, setStep] = useState<LoginStep>('credentials')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  async function handleSubmit(e: React.FormEvent) {
+  // Desafio do segundo fator (conta com MFA já ativo).
+  const [mfaCode, setMfaCode] = useState('')
+
+  // Matrícula forçada (admin sem MFA): token de matrícula + QR + segredo.
+  const [enrollmentToken, setEnrollmentToken] = useState('')
+  const [qrCode, setQrCode] = useState('')
+  const [secret, setSecret] = useState('')
+  const [enableCode, setEnableCode] = useState('')
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
+
+  function describeError(err: unknown) {
+    setError(err instanceof api.ApiError ? err.message : 'Erro ao conectar ao servidor.')
+  }
+
+  // Resolve a resposta do login nos três estados possíveis.
+  async function resolveLogin(res: api.LoginResponse) {
+    if ('token' in res) {
+      localStorage.setItem('admin_token', res.token)
+      onLogin(res.token)
+      return
+    }
+    if ('mfaSetupRequired' in res) {
+      // Admin sem MFA: já busca o QR com o token de matrícula e abre o cadastro.
+      const setup = await api.mfaSetup(res.enrollmentToken)
+      setEnrollmentToken(res.enrollmentToken)
+      setQrCode(setup.qrCode)
+      setSecret(setup.secret)
+      setStep('enroll')
+      return
+    }
+    // mfaRequired: conta com MFA ativo, falta o código.
+    setStep('challenge')
+  }
+
+  async function submitCredentials(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      const { token } = await api.login(email, password)
-      localStorage.setItem('admin_token', token)
-      onLogin(token)
+      await resolveLogin(await api.login(email, password))
     } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : 'Erro ao conectar ao servidor.')
+      describeError(err)
     } finally {
       setLoading(false)
     }
   }
+
+  async function submitChallenge(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      await resolveLogin(await api.login(email, password, mfaCode.trim()))
+    } catch (err) {
+      describeError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function submitEnable(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const res = await api.mfaEnable(enrollmentToken, enableCode.trim())
+      setRecoveryCodes(res.recoveryCodes)
+    } catch (err) {
+      describeError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function resetToCredentials() {
+    setStep('credentials')
+    setError('')
+    setMfaCode('')
+    setEnableCode('')
+    setEnrollmentToken('')
+    setQrCode('')
+    setSecret('')
+    setRecoveryCodes(null)
+  }
+
+  // Concluída a matrícula: vai pro desafio para o admin entrar com um código fresco.
+  function finishEnrollment() {
+    setRecoveryCodes(null)
+    setEnableCode('')
+    setError('')
+    setStep('challenge')
+  }
+
+  const subtitle =
+    step === 'enroll'
+      ? 'Configurar verificação em duas etapas'
+      : step === 'challenge'
+        ? 'Verificação em duas etapas'
+        : 'Painel de moderação'
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
@@ -162,42 +256,158 @@ function LoginScreen({ onLogin }: LoginScreenProps) {
             <span className="text-white text-2xl font-bold">C</span>
           </div>
           <h1 className="text-2xl font-bold text-white">Conectaí Admin</h1>
-          <p className="text-zinc-400 text-sm mt-1">Painel de moderação</p>
+          <p className="text-zinc-400 text-sm mt-1">{subtitle}</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4 shadow-xl">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4 shadow-xl">
           {error && (
             <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
               <AlertTriangle size={14} />
               {error}
             </div>
           )}
-          <div className="space-y-1">
-            <label className="block text-xs text-zinc-400 font-medium uppercase tracking-wide">E-mail</label>
-            <input
-              type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-              className="w-full h-10 px-3 rounded-lg bg-zinc-800 border border-zinc-700 text-white text-sm
-                         placeholder-zinc-500 focus:outline-none focus:border-violet-500 transition-colors"
-              placeholder="admin@conectai.com"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="block text-xs text-zinc-400 font-medium uppercase tracking-wide">Senha</label>
-            <input
-              type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
-              className="w-full h-10 px-3 rounded-lg bg-zinc-800 border border-zinc-700 text-white text-sm
-                         placeholder-zinc-500 focus:outline-none focus:border-violet-500 transition-colors"
-              placeholder="••••••••"
-            />
-          </div>
-          <button
-            type="submit" disabled={loading}
-            className="w-full h-10 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-60
-                       text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
-          >
-            {loading ? <Spinner /> : 'Entrar'}
-          </button>
-        </form>
+
+          {step === 'credentials' && (
+            <form onSubmit={submitCredentials} className="space-y-4">
+              <div className="space-y-1">
+                <label className="block text-xs text-zinc-400 font-medium uppercase tracking-wide">E-mail</label>
+                <input
+                  type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                  className={inputClass} placeholder="admin@conectai.com"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs text-zinc-400 font-medium uppercase tracking-wide">Senha</label>
+                <input
+                  type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
+                  className={inputClass} placeholder="••••••••"
+                />
+              </div>
+              <button
+                type="submit" disabled={loading}
+                className="w-full h-10 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-60
+                           text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+              >
+                {loading ? <Spinner /> : 'Entrar'}
+              </button>
+            </form>
+          )}
+
+          {step === 'challenge' && (
+            <form onSubmit={submitChallenge} className="space-y-4">
+              <div className="flex items-center gap-2 text-zinc-300 text-sm">
+                <KeyRound size={15} className="text-violet-400" />
+                Digite o código do app autenticador.
+              </div>
+              <input
+                inputMode="numeric" autoFocus required value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                className={`${inputClass} text-center tracking-[0.3em] text-lg`}
+                placeholder="000000"
+              />
+              <p className="text-xs text-zinc-500">
+                Sem o aparelho? Use um dos seus códigos de recuperação.
+              </p>
+              <button
+                type="submit" disabled={loading || mfaCode.trim().length < 6}
+                className="w-full h-10 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-60
+                           text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+              >
+                {loading ? <Spinner /> : 'Verificar'}
+              </button>
+              <button
+                type="button" onClick={resetToCredentials}
+                className="w-full flex items-center justify-center gap-1.5 text-zinc-400 hover:text-zinc-200 text-xs transition-colors"
+              >
+                <ArrowLeft size={13} /> Voltar
+              </button>
+            </form>
+          )}
+
+          {step === 'enroll' && recoveryCodes && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-emerald-400 text-sm">
+                <ShieldCheck size={16} /> MFA ativado.
+              </div>
+              <p className="text-xs text-zinc-400">
+                Guarde os <strong className="text-zinc-200">códigos de recuperação</strong> abaixo
+                num lugar seguro. Cada um funciona uma única vez e é a sua única forma de entrar
+                se perder o aparelho. <strong className="text-zinc-200">Não serão exibidos de novo.</strong>
+              </p>
+              <div className="grid grid-cols-2 gap-1.5 rounded-lg bg-zinc-950 border border-zinc-800 p-3 font-mono text-sm text-zinc-200">
+                {recoveryCodes.map((c) => (
+                  <span key={c} className="text-center py-0.5">{c}</span>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(recoveryCodes.join('\n'))}
+                className="w-full h-9 rounded-lg border border-zinc-700 text-zinc-300 text-xs hover:bg-zinc-800
+                           transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Copy size={13} /> Copiar códigos
+              </button>
+              <button
+                type="button" onClick={finishEnrollment}
+                className="w-full h-10 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold
+                           transition-colors"
+              >
+                Guardei — continuar para o login
+              </button>
+            </div>
+          )}
+
+          {step === 'enroll' && !recoveryCodes && (
+            <form onSubmit={submitEnable} className="space-y-4">
+              <div className="flex items-start gap-2 text-zinc-300 text-sm">
+                <ShieldCheck size={16} className="text-violet-400 mt-0.5 shrink-0" />
+                <span>Esta conta exige verificação em duas etapas. Escaneie o QR no Google/Microsoft
+                  Authenticator (ou similar) e digite o código gerado.</span>
+              </div>
+              {qrCode && (
+                <div className="flex justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={qrCode} alt="QR Code para configurar o MFA"
+                    className="w-44 h-44 rounded-lg bg-white p-2"
+                  />
+                </div>
+              )}
+              {secret && (
+                <div className="space-y-1">
+                  <p className="text-xs text-zinc-500 uppercase tracking-wide">Ou digite a chave manualmente</p>
+                  <button
+                    type="button" onClick={() => navigator.clipboard?.writeText(secret)}
+                    className="w-full flex items-center justify-between gap-2 rounded-lg bg-zinc-950 border border-zinc-800
+                               px-3 py-2 font-mono text-xs text-zinc-300 hover:bg-zinc-900 transition-colors break-all text-left"
+                  >
+                    <span>{secret}</span>
+                    <Copy size={13} className="shrink-0 text-zinc-500" />
+                  </button>
+                </div>
+              )}
+              <input
+                inputMode="numeric" autoFocus required value={enableCode}
+                onChange={(e) => setEnableCode(e.target.value)}
+                className={`${inputClass} text-center tracking-[0.3em] text-lg`}
+                placeholder="000000"
+              />
+              <button
+                type="submit" disabled={loading || enableCode.trim().length < 6}
+                className="w-full h-10 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-60
+                           text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+              >
+                {loading ? <Spinner /> : 'Ativar e continuar'}
+              </button>
+              <button
+                type="button" onClick={resetToCredentials}
+                className="w-full flex items-center justify-center gap-1.5 text-zinc-400 hover:text-zinc-200 text-xs transition-colors"
+              >
+                <ArrowLeft size={13} /> Cancelar
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   )
