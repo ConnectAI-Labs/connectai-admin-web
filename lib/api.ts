@@ -68,8 +68,30 @@ export interface ReportListResponse {
   nextCursor?: string | null
 }
 
-export interface LoginResponse {
+// O login pode resultar em três estados — a decisão de exigir MFA vem do
+// backend; o front só reage ao que ele responde.
+export interface LoginTokenResponse {
   token: string
+}
+export interface MfaRequiredResponse {
+  mfaRequired: true
+}
+export interface MfaSetupRequiredResponse {
+  mfaSetupRequired: true
+  enrollmentToken: string
+}
+export type LoginResponse =
+  | LoginTokenResponse
+  | MfaRequiredResponse
+  | MfaSetupRequiredResponse
+
+export interface MfaSetupResponse {
+  otpauthUrl: string
+  qrCode: string
+  secret: string
+}
+export interface MfaEnableResponse {
+  recoveryCodes: string[]
 }
 
 export interface ReportFilters {
@@ -122,8 +144,25 @@ async function request<T>(path: string, { token, method = 'GET', body }: Request
 
 // ─── API functions ────────────────────────────────────────────────────────────
 
-export function login(email: string, password: string): Promise<LoginResponse> {
-  return request<LoginResponse>('/auth/login', { method: 'POST', body: { email, password } })
+export function login(email: string, password: string, mfaCode?: string): Promise<LoginResponse> {
+  const body = mfaCode ? { email, password, mfaCode } : { email, password }
+  return request<LoginResponse>('/auth/login', { method: 'POST', body })
+}
+
+// Matrícula de MFA (admin sem segundo fator): o enrollmentToken vem do login e
+// só autoriza setup/enable. setup devolve o QR + secret pra escanear no app.
+export function mfaSetup(enrollmentToken: string): Promise<MfaSetupResponse> {
+  return request<MfaSetupResponse>('/auth/mfa/setup', { token: enrollmentToken, method: 'POST' })
+}
+
+// enable confirma o código do app, ativa o MFA e devolve os códigos de
+// recuperação (exibidos uma única vez).
+export function mfaEnable(enrollmentToken: string, code: string): Promise<MfaEnableResponse> {
+  return request<MfaEnableResponse>('/auth/mfa/enable', {
+    token: enrollmentToken,
+    method: 'POST',
+    body: { code },
+  })
 }
 
 export function getMe(token: string): Promise<User> {
