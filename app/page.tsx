@@ -1,13 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { LogOut, RefreshCw, X, AlertTriangle, Trash2, ShieldCheck, KeyRound, Copy, ArrowLeft } from 'lucide-react'
+import { LogOut, RefreshCw, X, AlertTriangle, Trash2, ShieldCheck, KeyRound, Copy, ArrowLeft, Shield, ChevronDown } from 'lucide-react'
 import * as api from '@/lib/api'
 import type { Report, ReportStatus, ReportFilters, UpdateReportBody } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type View = 'list' | 'detail'
+type View = 'list' | 'detail' | 'lgpd'
 
 interface Filters {
   status: string
@@ -71,6 +71,28 @@ const TARGET_CLASS: Record<string, string> = {
   USER: 'bg-rose-500/10 text-rose-400 border border-rose-500/20',
 }
 
+const CONSENT_ACTION_LABEL: Record<string, string> = {
+  GRANTED: 'Concedido',
+  REVOKED: 'Revogado',
+  UPDATED: 'Atualizado',
+  EXPORTED: 'Exportado',
+}
+
+const CONSENT_ACTION_CLASS: Record<string, string> = {
+  GRANTED: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
+  REVOKED: 'bg-red-500/10 text-red-400 border border-red-500/20',
+  UPDATED: 'bg-amber-500/10 text-amber-400 border border-amber-500/20',
+  EXPORTED: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
+}
+
+const CONSENT_ACTION_OPTIONS = [
+  { value: '', label: 'Todas as ações' },
+  { value: 'GRANTED', label: 'Concedido' },
+  { value: 'REVOKED', label: 'Revogado' },
+  { value: 'UPDATED', label: 'Atualizado' },
+  { value: 'EXPORTED', label: 'Exportado' },
+]
+
 function getTargetType(report: Report): string {
   if (report.eventId) return 'EVENT'
   if (report.commentId) return 'COMMENT'
@@ -123,6 +145,239 @@ function TargetBadge({ type }: { type: string }) {
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${TARGET_CLASS[type] ?? 'bg-zinc-700 text-zinc-400'}`}>
       {TARGET_LABEL[type] ?? type}
     </span>
+  )
+}
+
+function ConsentActionBadge({ action }: { action: string }) {
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${CONSENT_ACTION_CLASS[action] ?? 'bg-zinc-700 text-zinc-400'}`}>
+      {CONSENT_ACTION_LABEL[action] ?? action}
+    </span>
+  )
+}
+
+// ─── ConsentAuditRow ──────────────────────────────────────────────────────────
+
+interface ConsentAuditRowProps {
+  entry: api.ConsentAuditEntry
+  expanded: boolean
+  onToggle: () => void
+}
+
+function ConsentAuditRow({ entry, expanded, onToggle }: ConsentAuditRowProps) {
+  const hasMetadata = !!entry.metadata && Object.keys(entry.metadata).length > 0
+
+  return (
+    <>
+      <tr
+        onClick={hasMetadata ? onToggle : undefined}
+        className={`border-b border-zinc-800 transition-colors ${hasMetadata ? 'cursor-pointer hover:bg-zinc-800/50' : ''}`}
+      >
+        <td className="px-4 py-3">
+          <p className="text-sm text-zinc-300">{entry.userName}</p>
+          <p className="text-xs text-zinc-500">{entry.userEmail}</p>
+        </td>
+        <td className="px-4 py-3"><ConsentActionBadge action={entry.action} /></td>
+        <td className="px-4 py-3 text-sm text-zinc-400">
+          {new Date(entry.timestamp).toLocaleString('pt-BR')}
+        </td>
+        <td className="px-4 py-3 text-sm text-zinc-500 font-mono">
+          {entry.ipAddress ?? '—'}
+        </td>
+        <td className="px-4 py-3">
+          {hasMetadata ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggle() }}
+              className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              <ChevronDown size={13} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              {expanded ? 'Ocultar' : 'Ver'}
+            </button>
+          ) : (
+            <span className="text-xs text-zinc-600">—</span>
+          )}
+        </td>
+      </tr>
+      {expanded && hasMetadata && (
+        <tr className="border-b border-zinc-800 bg-zinc-950/40">
+          <td colSpan={5} className="px-4 py-3">
+            <pre className="text-xs text-zinc-400 bg-zinc-900 rounded-lg p-3 overflow-x-auto">
+              {JSON.stringify(entry.metadata, null, 2)}
+            </pre>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+// ─── ConsentAuditView ─────────────────────────────────────────────────────────
+
+function ConsentAuditView({ token }: { token: string }) {
+  const [stats, setStats] = useState<api.ConsentStats | null>(null)
+  const [entries, setEntries] = useState<api.ConsentAuditEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  const [draftUserId, setDraftUserId] = useState('')
+  const [draftAction, setDraftAction] = useState('')
+  const [draftStartDate, setDraftStartDate] = useState('')
+  const [draftEndDate, setDraftEndDate] = useState('')
+
+  const [appliedFilters, setAppliedFilters] = useState<api.ConsentAuditFilters>({})
+
+  useEffect(() => {
+    api.getConsentStats(token).then(setStats).catch(() => {})
+  }, [token])
+
+  async function fetchEntries(reset = true) {
+    if (reset) setLoading(true)
+    else setLoadingMore(true)
+    setError('')
+    try {
+      const params: api.ConsentAuditFilters = { limit: 20, ...appliedFilters }
+      if (!reset && nextCursor) params.cursor = nextCursor
+      const res = await api.listConsentAudit(token, params)
+      setEntries((prev) => (reset ? res.entries : [...prev, ...res.entries]))
+      setNextCursor(res.nextCursor ?? null)
+    } catch {
+      setError('Não foi possível carregar o log de auditoria.')
+    } finally {
+      setLoading(false)
+      setLoadingMore(false)
+    }
+  }
+
+  useEffect(() => { fetchEntries(true) }, [appliedFilters]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function applyFilters() {
+    const filters: api.ConsentAuditFilters = {}
+    if (draftUserId.trim()) filters.userId = draftUserId.trim()
+    if (draftAction) filters.action = draftAction as api.ConsentAction
+    if (draftStartDate) filters.startDate = draftStartDate
+    if (draftEndDate) filters.endDate = draftEndDate
+    setAppliedFilters(filters)
+    setExpandedId(null)
+  }
+
+  const totalEvents = stats ? Object.values(stats.byAction).reduce((a, b) => a + b, 0) : 0
+
+  return (
+    <main className="flex-1 p-6 max-w-6xl mx-auto w-full space-y-6">
+      {/* Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <MetricCard label="Ativos" value={stats?.totalActive ?? '—'} accent />
+        <MetricCard label="Revogados" value={stats?.totalRevoked ?? '—'} />
+        <MetricCard label="Exportados" value={stats?.totalExported ?? '—'} />
+        <MetricCard label="Total eventos" value={stats ? totalEvents : '—'} />
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <label className="block text-xs text-zinc-500 uppercase tracking-wide font-medium">Usuário / E-mail</label>
+          <input
+            value={draftUserId}
+            onChange={(e) => setDraftUserId(e.target.value)}
+            placeholder="ID ou e-mail"
+            className="h-9 px-3 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm
+                       placeholder-zinc-500 focus:outline-none focus:border-violet-500 transition-colors"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-xs text-zinc-500 uppercase tracking-wide font-medium">Ação</label>
+          <Select value={draftAction} onChange={setDraftAction} options={CONSENT_ACTION_OPTIONS} />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-xs text-zinc-500 uppercase tracking-wide font-medium">De</label>
+          <input
+            type="date"
+            value={draftStartDate}
+            onChange={(e) => setDraftStartDate(e.target.value)}
+            className="h-9 px-3 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm
+                       focus:outline-none focus:border-violet-500 transition-colors"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-xs text-zinc-500 uppercase tracking-wide font-medium">Até</label>
+          <input
+            type="date"
+            value={draftEndDate}
+            onChange={(e) => setDraftEndDate(e.target.value)}
+            className="h-9 px-3 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm
+                       focus:outline-none focus:border-violet-500 transition-colors"
+          />
+        </div>
+        <button
+          onClick={applyFilters}
+          className="h-9 px-5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors"
+        >
+          Aplicar
+        </button>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+          <AlertTriangle size={14} /> {error}
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Spinner />
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-zinc-500 text-sm gap-2">
+            <Shield size={24} className="text-zinc-700" />
+            Nenhum registro de auditoria encontrado.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-zinc-800">
+                  {['Usuário', 'Ação', 'Data/hora', 'IP', 'Metadata'].map((h) => (
+                    <th key={h} className="px-4 py-3 text-left text-xs text-zinc-500 uppercase tracking-wide font-medium">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry) => (
+                  <ConsentAuditRow
+                    key={entry.id}
+                    entry={entry}
+                    expanded={expandedId === entry.id}
+                    onToggle={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Pagination */}
+      {nextCursor && !loading && (
+        <div className="flex justify-center">
+          <button
+            onClick={() => fetchEntries(false)}
+            disabled={loadingMore}
+            className="h-9 px-6 rounded-lg border border-zinc-700 text-zinc-300 text-sm
+                       hover:bg-zinc-800 disabled:opacity-60 transition-colors flex items-center gap-2"
+          >
+            {loadingMore ? <Spinner /> : 'Próxima página'}
+          </button>
+        </div>
+      )}
+    </main>
   )
 }
 
@@ -851,15 +1106,33 @@ function AdminDashboard({ token, onLogout }: AdminDashboardProps) {
     <div className="min-h-screen flex flex-col">
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-10">
-        <div>
-          <span className="text-white font-semibold">Conectaí Admin</span>
-          <span className="ml-2 text-xs text-zinc-500 bg-zinc-800 rounded-full px-2 py-0.5">Moderação</span>
-        </div>
+        <span className="text-white font-semibold">Conectaí Admin</span>
+        <nav className="flex items-center gap-1 bg-zinc-800/60 rounded-lg p-1">
+          <button
+            onClick={() => setView('list')}
+            className={`flex items-center h-7 px-3 rounded-md text-sm font-medium transition-colors ${
+              view === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Moderação
+          </button>
+          <button
+            onClick={() => setView('lgpd')}
+            className={`flex items-center gap-1.5 h-7 px-3 rounded-md text-sm font-medium transition-colors ${
+              view === 'lgpd' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Shield size={13} /> Auditoria LGPD
+          </button>
+        </nav>
         <button onClick={onLogout} className="flex items-center gap-1.5 text-zinc-400 hover:text-white text-sm transition-colors">
           <LogOut size={15} /> Sair
         </button>
       </header>
 
+      {view === 'lgpd' ? (
+        <ConsentAuditView token={token} />
+      ) : (
       <main className="flex-1 p-6 max-w-6xl mx-auto w-full space-y-6">
         {/* Metrics */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -942,6 +1215,7 @@ function AdminDashboard({ token, onLogout }: AdminDashboardProps) {
           </div>
         )}
       </main>
+      )}
     </div>
   )
 }
