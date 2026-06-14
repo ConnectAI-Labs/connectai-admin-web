@@ -175,7 +175,6 @@ function ConsentAuditRow({ entry, expanded, onToggle }: ConsentAuditRowProps) {
       >
         <td className="px-4 py-3">
           <p className="text-sm text-zinc-300">{entry.userName}</p>
-          <p className="text-xs text-zinc-500">{entry.userEmail}</p>
         </td>
         <td className="px-4 py-3"><ConsentActionBadge action={entry.action} /></td>
         <td className="px-4 py-3 text-sm text-zinc-400">
@@ -241,7 +240,7 @@ function ConsentAuditView({ token }: { token: string }) {
       const params: api.ConsentAuditFilters = { limit: 20, ...appliedFilters }
       if (!reset && nextCursor) params.cursor = nextCursor
       const res = await api.listConsentAudit(token, params)
-      setEntries((prev) => (reset ? res.entries : [...prev, ...res.entries]))
+      setEntries((prev) => (reset ? res.data : [...prev, ...res.data]))
       setNextCursor(res.nextCursor ?? null)
     } catch {
       setError('Não foi possível carregar o log de auditoria.')
@@ -263,26 +262,26 @@ function ConsentAuditView({ token }: { token: string }) {
     setExpandedId(null)
   }
 
-  const totalEvents = stats ? Object.values(stats.byAction).reduce((a, b) => a + b, 0) : 0
+  const totalEvents = stats ? Object.values(stats.actionDistribution).reduce((a, b) => a + b, 0) : 0
 
   return (
     <main className="flex-1 p-6 max-w-6xl mx-auto w-full space-y-6">
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MetricCard label="Ativos" value={stats?.totalActive ?? '—'} accent />
-        <MetricCard label="Revogados" value={stats?.totalRevoked ?? '—'} />
-        <MetricCard label="Exportados" value={stats?.totalExported ?? '—'} />
+        <MetricCard label="Ativos" value={stats?.totalUsersWithActiveConsent ?? '—'} accent />
+        <MetricCard label="Revogados" value={stats?.totalRevocations ?? '—'} />
+        <MetricCard label="Exportados" value={stats?.totalExports ?? '—'} />
         <MetricCard label="Total eventos" value={stats ? totalEvents : '—'} />
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
-          <label className="block text-xs text-zinc-500 uppercase tracking-wide font-medium">Usuário / E-mail</label>
+          <label className="block text-xs text-zinc-500 uppercase tracking-wide font-medium">Usuário (ID)</label>
           <input
             value={draftUserId}
             onChange={(e) => setDraftUserId(e.target.value)}
-            placeholder="ID ou e-mail"
+            placeholder="ID do usuário"
             className="h-9 px-3 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm
                        placeholder-zinc-500 focus:outline-none focus:border-violet-500 transition-colors"
           />

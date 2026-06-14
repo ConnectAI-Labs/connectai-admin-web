@@ -204,7 +204,6 @@ export interface ConsentAuditEntry {
   id: string
   userId: string
   userName: string
-  userEmail: string
   action: ConsentAction
   timestamp: string
   ipAddress?: string
@@ -212,16 +211,16 @@ export interface ConsentAuditEntry {
 }
 
 export interface ConsentAuditResponse {
-  entries: ConsentAuditEntry[]
+  data: ConsentAuditEntry[]
   nextCursor?: string
   total: number
 }
 
 export interface ConsentStats {
-  totalActive: number
-  totalRevoked: number
-  totalExported: number
-  byAction: Record<ConsentAction, number>
+  totalUsersWithActiveConsent: number
+  totalRevocations: number
+  totalExports: number
+  actionDistribution: Record<ConsentAction, number>
 }
 
 export interface ConsentAuditFilters {
