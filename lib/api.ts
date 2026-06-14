@@ -213,7 +213,6 @@ export interface ConsentAuditEntry {
 export interface ConsentAuditResponse {
   data: ConsentAuditEntry[]
   nextCursor?: string
-  total: number
 }
 
 export interface ConsentStats {

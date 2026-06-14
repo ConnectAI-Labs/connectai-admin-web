@@ -256,8 +256,8 @@ function ConsentAuditView({ token }: { token: string }) {
     const filters: api.ConsentAuditFilters = {}
     if (draftUserId.trim()) filters.userId = draftUserId.trim()
     if (draftAction) filters.action = draftAction as api.ConsentAction
-    if (draftStartDate) filters.startDate = draftStartDate
-    if (draftEndDate) filters.endDate = draftEndDate
+    if (draftStartDate) filters.startDate = `${draftStartDate}T00:00:00.000Z`
+    if (draftEndDate) filters.endDate = `${draftEndDate}T23:59:59.999Z`
     setAppliedFilters(filters)
     setExpandedId(null)
   }
