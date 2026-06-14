@@ -38,6 +38,7 @@ const REASON_OPTIONS = [
 const TARGET_OPTIONS = [
   { value: '', label: 'Todos os tipos' },
   { value: 'EVENT', label: 'Evento' },
+  { value: 'POST', label: 'Publicação' },
   { value: 'COMMENT', label: 'Comentário' },
   { value: 'MESSAGE', label: 'Mensagem' },
   { value: 'USER', label: 'Usuário' },
@@ -59,6 +60,7 @@ const STATUS_CLASS: Record<string, string> = {
 
 const TARGET_LABEL: Record<string, string> = {
   EVENT: 'Evento',
+  POST: 'Publicação',
   COMMENT: 'Comentário',
   MESSAGE: 'Mensagem',
   USER: 'Usuário',
@@ -66,6 +68,7 @@ const TARGET_LABEL: Record<string, string> = {
 
 const TARGET_CLASS: Record<string, string> = {
   EVENT: 'bg-violet-500/10 text-violet-400 border border-violet-500/20',
+  POST: 'bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20',
   COMMENT: 'bg-sky-500/10 text-sky-400 border border-sky-500/20',
   MESSAGE: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
   USER: 'bg-rose-500/10 text-rose-400 border border-rose-500/20',
@@ -73,6 +76,7 @@ const TARGET_CLASS: Record<string, string> = {
 
 function getTargetType(report: Report): string {
   if (report.eventId) return 'EVENT'
+  if (report.postId) return 'POST'
   if (report.commentId) return 'COMMENT'
   if (report.messageId) return 'MESSAGE'
   if (report.targetUserId) return 'USER'
@@ -327,6 +331,42 @@ function TargetPreview({ report }: { report: Report }) {
         <p className="text-zinc-500">
           {report.event.isPublic ? 'Público' : 'Privado'} ·{' '}
           {new Date(report.event.date).toLocaleDateString('pt-BR')}
+        </p>
+      </div>
+    )
+  }
+  if (report.post) {
+    const { post } = report
+    return (
+      <div className="bg-zinc-800/60 rounded-lg p-3 text-sm space-y-2">
+        {post.content && (
+          <p className="text-zinc-300 whitespace-pre-wrap">"{post.content}"</p>
+        )}
+        {post.images.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            {post.images.map((img) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <a
+                key={img.id}
+                href={img.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block"
+              >
+                <img
+                  src={img.url}
+                  alt="Imagem denunciada"
+                  className="aspect-square w-full rounded-md object-cover border border-zinc-700"
+                />
+              </a>
+            ))}
+          </div>
+        )}
+        <p className="text-zinc-500">
+          {post.author
+            ? `${post.author.name} ${post.author.lastname} · @${post.author.username}`
+            : `Autor: ${post.authorId.slice(0, 8)}…`}
+          {post.event ? ` · Evento: ${post.event.title}` : ''}
         </p>
       </div>
     )

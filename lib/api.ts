@@ -41,6 +41,33 @@ export interface ReportMessage {
   conversationId: string
 }
 
+export interface ReportPostImage {
+  id: string
+  url: string
+  format: string
+  size: number
+  order: number
+}
+
+export interface ReportPostAuthor {
+  id: string
+  name: string
+  lastname: string
+  username: string
+  avatarUrl?: string | null
+}
+
+export interface ReportPost {
+  id: string
+  content: string
+  createdAt: string
+  authorId: string
+  eventId: string
+  author?: ReportPostAuthor | null
+  event?: { id: string; title: string } | null
+  images: ReportPostImage[]
+}
+
 export type ReportStatus = 'PENDING' | 'REVIEWED' | 'RESOLVED_REMOVED' | 'RESOLVED_INVALID'
 
 export interface Report {
@@ -56,10 +83,12 @@ export interface Report {
   eventId?: string | null
   commentId?: string | null
   messageId?: string | null
+  postId?: string | null
   targetUserId?: string | null
   event?: ReportEvent | null
   comment?: ReportComment | null
   message?: ReportMessage | null
+  post?: ReportPost | null
   targetUser?: User | null
 }
 
