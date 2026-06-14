@@ -799,14 +799,14 @@ function TargetPreview({ report }: { report: Report }) {
   if (report.comment) {
     return (
       <div className="bg-zinc-800/60 rounded-lg p-3 text-sm">
-        <p className="text-zinc-300 italic">"{report.comment.content}"</p>
+        <p className="text-zinc-300 italic">&ldquo;{report.comment.content}&rdquo;</p>
       </div>
     )
   }
   if (report.message) {
     return (
       <div className="bg-zinc-800/60 rounded-lg p-3 text-sm">
-        <p className="text-zinc-300 italic">"{report.message.content ?? '(sem conteúdo)'}"</p>
+        <p className="text-zinc-300 italic">&ldquo;{report.message.content ?? '(sem conteúdo)'}&rdquo;</p>
         <p className="text-zinc-500 mt-1">Conversa: {report.message.conversationId.slice(0, 8)}…</p>
       </div>
     )
