@@ -243,13 +243,13 @@ export function listConsentAudit(token: string, params?: ConsentAuditFilters): P
     })
   }
   const query = searchParams.toString()
-  return request<ConsentAuditResponse>(`/consent/audit${query ? `?${query}` : ''}`, { token })
+  return request<ConsentAuditResponse>(`/admin/consent/audit${query ? `?${query}` : ''}`, { token })
 }
 
 export function getConsentAuditByUser(token: string, userId: string): Promise<ConsentAuditResponse> {
-  return request<ConsentAuditResponse>(`/consent/audit/user/${userId}`, { token })
+  return request<ConsentAuditResponse>(`/admin/consent/audit/${userId}`, { token })
 }
 
 export function getConsentStats(token: string): Promise<ConsentStats> {
-  return request<ConsentStats>('/consent/stats', { token })
+  return request<ConsentStats>('/admin/consent/stats', { token })
 }
