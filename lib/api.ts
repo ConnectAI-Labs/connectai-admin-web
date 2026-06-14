@@ -195,3 +195,59 @@ export function removeReportTarget(token: string, id: string): Promise<Report | 
 export function deleteReport(token: string, id: string): Promise<null> {
   return request<null>(`/reports/${id}`, { token, method: 'DELETE' })
 }
+
+// ─── Consent Audit ────────────────────────────────────────────────────────────
+
+export type ConsentAction = 'GRANTED' | 'REVOKED' | 'UPDATED' | 'EXPORTED'
+
+export interface ConsentAuditEntry {
+  id: string
+  userId: string
+  userName: string
+  action: ConsentAction
+  timestamp: string
+  ipAddress?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface ConsentAuditResponse {
+  data: ConsentAuditEntry[]
+  nextCursor?: string
+}
+
+export interface ConsentStats {
+  totalUsersWithActiveConsent: number
+  totalRevocations: number
+  totalExports: number
+  actionDistribution: Record<ConsentAction, number>
+}
+
+export interface ConsentAuditFilters {
+  userId?: string
+  action?: ConsentAction
+  startDate?: string
+  endDate?: string
+  cursor?: string
+  limit?: number
+}
+
+export function listConsentAudit(token: string, params?: ConsentAuditFilters): Promise<ConsentAuditResponse> {
+  const searchParams = new URLSearchParams()
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== '' && value !== null && value !== undefined) {
+        searchParams.set(key, String(value))
+      }
+    })
+  }
+  const query = searchParams.toString()
+  return request<ConsentAuditResponse>(`/admin/consent/audit${query ? `?${query}` : ''}`, { token })
+}
+
+export function getConsentAuditByUser(token: string, userId: string): Promise<ConsentAuditResponse> {
+  return request<ConsentAuditResponse>(`/admin/consent/audit/${userId}`, { token })
+}
+
+export function getConsentStats(token: string): Promise<ConsentStats> {
+  return request<ConsentStats>('/admin/consent/stats', { token })
+}
