@@ -41,7 +41,40 @@ export interface ReportMessage {
   conversationId: string
 }
 
-export type ReportStatus = 'PENDING' | 'REVIEWED' | 'RESOLVED_REMOVED' | 'RESOLVED_INVALID'
+export interface ReportPostImage {
+  id: string
+  url: string
+  format: string
+  size: number
+  order: number
+}
+
+export interface ReportPostAuthor {
+  id: string
+  name: string
+  lastname: string
+  username: string
+  avatarUrl?: string | null
+}
+
+export interface ReportPost {
+  id: string
+  content: string
+  createdAt: string
+  authorId: string
+  eventId: string
+  author?: ReportPostAuthor | null
+  event?: { id: string; title: string } | null
+  images: ReportPostImage[]
+}
+
+export type ReportStatus =
+  | 'PENDING'
+  | 'REVIEWED'
+  | 'RESOLVED_REMOVED'
+  | 'RESOLVED_INVALID'
+  | 'RESOLVED_SUSPENDED'
+  | 'RESOLVED_BANNED'
 
 export interface Report {
   id: string
@@ -56,10 +89,12 @@ export interface Report {
   eventId?: string | null
   commentId?: string | null
   messageId?: string | null
+  postId?: string | null
   targetUserId?: string | null
   event?: ReportEvent | null
   comment?: ReportComment | null
   message?: ReportMessage | null
+  post?: ReportPost | null
   targetUser?: User | null
 }
 
@@ -105,6 +140,13 @@ export interface ReportFilters {
 export interface UpdateReportBody {
   status: ReportStatus
   resolutionNote?: string
+}
+
+export interface ModerateUserBody {
+  action: 'SUSPEND' | 'BAN'
+  /** Obrigatório para SUSPEND (prazo em dias); ignorado em BAN (permanente). */
+  days?: number
+  reason?: string
 }
 
 // ─── HTTP client ──────────────────────────────────────────────────────────────
@@ -194,6 +236,20 @@ export function removeReportTarget(token: string, id: string): Promise<Report | 
 
 export function deleteReport(token: string, id: string): Promise<null> {
   return request<null>(`/reports/${id}`, { token, method: 'DELETE' })
+}
+
+// Moderação do usuário denunciado (resolve a denúncia como RESOLVED_SUSPENDED /
+// RESOLVED_BANNED). Depende do backend de moderação de usuário (PR #94).
+export function moderateUser(
+  token: string,
+  reportId: string,
+  body: ModerateUserBody,
+): Promise<Report> {
+  return request<Report>(`/reports/${reportId}/moderate-user`, {
+    token,
+    method: 'POST',
+    body,
+  })
 }
 
 // ─── Consent Audit ────────────────────────────────────────────────────────────
