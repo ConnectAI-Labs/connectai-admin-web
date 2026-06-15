@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { LogOut, RefreshCw, X, AlertTriangle, Trash2 } from 'lucide-react'
+import { LogOut, RefreshCw, X, AlertTriangle, Trash2, Ban, ShieldOff, RotateCcw } from 'lucide-react'
 import * as api from '@/lib/api'
-import type { Report, ReportStatus, ReportFilters, UpdateReportBody } from '@/lib/api'
+import type { Report, ReportFilters } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,12 +17,15 @@ interface Filters {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// Status = a própria resolução. PENDING (padrão) + os RESOLVED_*. REVIEWED foi
+// removido: "olhei mas não resolvi" não é resolução — a nota cobre isso.
 const STATUS_OPTIONS = [
   { value: '', label: 'Todos os status' },
   { value: 'PENDING', label: 'Pendente' },
-  { value: 'REVIEWED', label: 'Em revisão' },
-  { value: 'RESOLVED_REMOVED', label: 'Resolvido — removido' },
-  { value: 'RESOLVED_INVALID', label: 'Resolvido — inválido' },
+  { value: 'RESOLVED_REMOVED', label: 'Removido' },
+  { value: 'RESOLVED_INVALID', label: 'Denúncia inválida' },
+  { value: 'RESOLVED_SUSPENDED', label: 'Usuário suspenso' },
+  { value: 'RESOLVED_BANNED', label: 'Usuário banido' },
 ]
 
 const REASON_OPTIONS = [
@@ -46,9 +49,12 @@ const TARGET_OPTIONS = [
 
 const STATUS_LABEL: Record<string, string> = {
   PENDING: 'Pendente',
+  // Legado: denúncias antigas ainda podem ter REVIEWED; mantido só p/ exibição.
   REVIEWED: 'Em revisão',
   RESOLVED_REMOVED: 'Removido',
-  RESOLVED_INVALID: 'Inválido',
+  RESOLVED_INVALID: 'Inválida',
+  RESOLVED_SUSPENDED: 'Suspenso',
+  RESOLVED_BANNED: 'Banido',
 }
 
 const STATUS_CLASS: Record<string, string> = {
@@ -56,6 +62,8 @@ const STATUS_CLASS: Record<string, string> = {
   REVIEWED: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
   RESOLVED_REMOVED: 'bg-red-500/10 text-red-400 border border-red-500/20',
   RESOLVED_INVALID: 'bg-zinc-700/60 text-zinc-400 border border-zinc-600/30',
+  RESOLVED_SUSPENDED: 'bg-orange-500/10 text-orange-400 border border-orange-500/20',
+  RESOLVED_BANNED: 'bg-red-500/15 text-red-300 border border-red-500/30',
 }
 
 const TARGET_LABEL: Record<string, string> = {
@@ -340,12 +348,11 @@ function TargetPreview({ report }: { report: Report }) {
     return (
       <div className="bg-zinc-800/60 rounded-lg p-3 text-sm space-y-2">
         {post.content && (
-          <p className="text-zinc-300 whitespace-pre-wrap">"{post.content}"</p>
+          <p className="text-zinc-300 whitespace-pre-wrap">&ldquo;{post.content}&rdquo;</p>
         )}
         {post.images.length > 0 && (
           <div className="grid grid-cols-3 gap-2">
             {post.images.map((img) => (
-              // eslint-disable-next-line @next/next/no-img-element
               <a
                 key={img.id}
                 href={img.url}
@@ -353,6 +360,7 @@ function TargetPreview({ report }: { report: Report }) {
                 rel="noopener noreferrer"
                 className="block"
               >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={img.url}
                   alt="Imagem denunciada"
@@ -374,14 +382,14 @@ function TargetPreview({ report }: { report: Report }) {
   if (report.comment) {
     return (
       <div className="bg-zinc-800/60 rounded-lg p-3 text-sm">
-        <p className="text-zinc-300 italic">"{report.comment.content}"</p>
+        <p className="text-zinc-300 italic">&ldquo;{report.comment.content}&rdquo;</p>
       </div>
     )
   }
   if (report.message) {
     return (
       <div className="bg-zinc-800/60 rounded-lg p-3 text-sm">
-        <p className="text-zinc-300 italic">"{report.message.content ?? '(sem conteúdo)'}"</p>
+        <p className="text-zinc-300 italic">&ldquo;{report.message.content ?? '(sem conteúdo)'}&rdquo;</p>
         <p className="text-zinc-500 mt-1">Conversa: {report.message.conversationId.slice(0, 8)}…</p>
       </div>
     )
@@ -413,68 +421,81 @@ function ReportDetail({ reportId, token, onBack, onUpdated }: ReportDetailProps)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
-  const [newStatus, setNewStatus] = useState<ReportStatus | ''>('')
   const [note, setNote] = useState('')
-  const [modal, setModal] = useState<'remove' | 'delete' | null>(null)
+  const [modal, setModal] = useState<'remove' | 'suspend' | 'ban' | null>(null)
+  const [suspendDays, setSuspendDays] = useState(7)
 
   useEffect(() => {
     setLoading(true)
     api.getReport(token, reportId)
       .then((r) => {
         setReport(r)
-        setNewStatus(r.status)
         setNote(r.resolutionNote ?? '')
       })
       .catch(() => setError('Não foi possível carregar o relatório.'))
       .finally(() => setLoading(false))
   }, [reportId, token])
 
-  async function handleSave() {
-    if (!report || !newStatus) return
-    setSaving(true)
-    try {
-      const body: UpdateReportBody = { status: newStatus as ReportStatus }
-      if (note) body.resolutionNote = note
-      const updated = await api.updateReport(token, report.id, body)
-      setReport(updated)
-      onUpdated()
-    } catch {
-      setError('Falha ao salvar.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleRemoveTarget() {
+  // Toda resolução é uma transição de status; a nota da moderação acompanha.
+  async function resolve(fn: () => Promise<unknown>, failMsg: string) {
     if (!report) return
     setSaving(true)
+    setError('')
     try {
-      await api.removeReportTarget(token, report.id)
+      await fn()
       const updated = await api.getReport(token, report.id)
       setReport(updated)
       onUpdated()
     } catch {
-      setError('Falha ao remover alvo.')
+      setError(failMsg)
     } finally {
       setSaving(false)
       setModal(null)
     }
   }
 
-  async function handleDelete() {
-    if (!report) return
-    setSaving(true)
-    try {
-      await api.deleteReport(token, report.id)
-      onUpdated()
-      onBack()
-    } catch {
-      setError('Falha ao excluir.')
-    } finally {
-      setSaving(false)
-      setModal(null)
-    }
-  }
+  const noteOrUndefined = () => (note.trim() ? note.trim() : undefined)
+
+  const handleSaveNote = () =>
+    resolve(
+      () => api.updateReport(token, report!.id, { status: report!.status, resolutionNote: note.trim() }),
+      'Falha ao salvar a nota.',
+    )
+
+  const handleInvalid = () =>
+    resolve(
+      () => api.updateReport(token, report!.id, { status: 'RESOLVED_INVALID', resolutionNote: noteOrUndefined() }),
+      'Falha ao marcar como inválida.',
+    )
+
+  const handleReopen = () =>
+    resolve(
+      () => api.updateReport(token, report!.id, { status: 'PENDING', resolutionNote: noteOrUndefined() }),
+      'Falha ao reabrir.',
+    )
+
+  // Remover conteúdo: o backend já transiciona para RESOLVED_REMOVED; a nota da
+  // moderação (se houver) é persistida por cima.
+  const handleRemoveTarget = () =>
+    resolve(async () => {
+      await api.removeReportTarget(token, report!.id)
+      if (note.trim())
+        await api.updateReport(token, report!.id, { status: 'RESOLVED_REMOVED', resolutionNote: note.trim() })
+    }, 'Falha ao remover o conteúdo.')
+
+  const handleModerate = (action: 'SUSPEND' | 'BAN') =>
+    resolve(
+      () =>
+        api.moderateUser(token, report!.id, {
+          action,
+          days: action === 'SUSPEND' ? suspendDays : undefined,
+          reason: noteOrUndefined(),
+        }),
+      action === 'SUSPEND'
+        ? 'Falha ao suspender (requer o backend de moderação de usuário — PR #94).'
+        : 'Falha ao banir (requer o backend de moderação de usuário — PR #94).',
+    )
+
 
   if (loading) return (
     <div className="flex-1 flex items-center justify-center">
@@ -544,64 +565,116 @@ function ReportDetail({ reportId, token, onBack, onUpdated }: ReportDetailProps)
         )}
       </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3 mb-4">
-        <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium">Atualizar status</p>
-        <Select
-          value={newStatus}
-          onChange={(v) => setNewStatus(v as ReportStatus)}
-          options={STATUS_OPTIONS.filter((o) => o.value !== '')}
-        />
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Nota de resolução (opcional)"
-          rows={3}
-          className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm
-                     placeholder-zinc-500 resize-none focus:outline-none focus:border-violet-500 transition-colors"
-        />
-        <button
-          onClick={handleSave} disabled={saving}
-          className="h-9 px-5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-60
-                     text-white text-sm font-semibold transition-colors flex items-center gap-2"
-        >
-          {saving ? <Spinner /> : 'Salvar'}
-        </button>
-      </div>
+      {/* Resolução = o próprio status. A nota é sempre opcional e independente. */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-4 mb-4">
+        <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium">Resolução</p>
 
-      <div className="flex gap-3">
-        <button
-          onClick={() => setModal('remove')}
-          className="flex items-center gap-2 h-9 px-4 rounded-lg border border-amber-500/30 text-amber-400
-                     hover:bg-amber-500/10 text-sm transition-colors"
-        >
-          <X size={14} /> Remover alvo
-        </button>
-        <button
-          onClick={() => setModal('delete')}
-          className="flex items-center gap-2 h-9 px-4 rounded-lg border border-red-500/30 text-red-400
-                     hover:bg-red-500/10 text-sm transition-colors"
-        >
-          <Trash2 size={14} /> Excluir denúncia
-        </button>
+        <div>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Nota da moderação (opcional) — registrada na denúncia."
+            rows={3}
+            className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm
+                       placeholder-zinc-500 resize-none focus:outline-none focus:border-violet-500 transition-colors"
+          />
+          <button
+            onClick={handleSaveNote} disabled={saving}
+            className="mt-2 h-8 px-3 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800
+                       disabled:opacity-60 text-xs font-medium transition-colors"
+          >
+            Salvar nota
+          </button>
+        </div>
+
+        <div className="border-t border-zinc-800 pt-4 space-y-3">
+          {targetType === 'USER' ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-400">Suspensão por</span>
+                <input
+                  type="number" min={1} max={3650} value={suspendDays}
+                  onChange={(e) => setSuspendDays(Math.max(1, Math.min(3650, Number(e.target.value) || 1)))}
+                  className="w-16 h-8 px-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm
+                             focus:outline-none focus:border-violet-500"
+                />
+                <span className="text-xs text-zinc-400">dias</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setModal('suspend')} disabled={saving}
+                  className="flex items-center gap-2 h-9 px-4 rounded-lg bg-orange-600 hover:bg-orange-500
+                             disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+                >
+                  <ShieldOff size={14} /> Suspender
+                </button>
+                <button
+                  onClick={() => setModal('ban')} disabled={saving}
+                  className="flex items-center gap-2 h-9 px-4 rounded-lg bg-red-600 hover:bg-red-500
+                             disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+                >
+                  <Ban size={14} /> Banir
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setModal('remove')} disabled={saving}
+              className="flex items-center gap-2 h-9 px-4 rounded-lg bg-red-600 hover:bg-red-500
+                         disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+            >
+              <Trash2 size={14} /> Remover conteúdo
+            </button>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleInvalid} disabled={saving}
+              className="flex items-center gap-2 h-9 px-4 rounded-lg border border-zinc-600 text-zinc-300
+                         hover:bg-zinc-800 disabled:opacity-60 text-sm transition-colors"
+            >
+              <X size={14} /> Denúncia inválida
+            </button>
+            {report.status !== 'PENDING' && (
+              <button
+                onClick={handleReopen} disabled={saving}
+                className="flex items-center gap-2 h-9 px-4 rounded-lg border border-amber-500/30 text-amber-400
+                           hover:bg-amber-500/10 disabled:opacity-60 text-sm transition-colors"
+              >
+                <RotateCcw size={14} /> Reabrir (pendente)
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {modal === 'remove' && (
         <ConfirmModal
-          title="Remover alvo"
-          description="O conteúdo denunciado será removido permanentemente. Esta ação não pode ser desfeita."
+          title="Remover conteúdo"
+          description="O conteúdo denunciado será removido permanentemente e a denúncia marcada como Removido. Esta ação não pode ser desfeita."
           confirmLabel="Remover"
           danger
           onConfirm={handleRemoveTarget}
           onCancel={() => setModal(null)}
         />
       )}
-      {modal === 'delete' && (
+      {modal === 'suspend' && (
         <ConfirmModal
-          title="Excluir denúncia"
-          description="A denúncia será excluída do sistema. Esta ação não pode ser desfeita."
-          confirmLabel="Excluir"
+          title="Suspender usuário"
+          description={`O usuário ficará suspenso por ${suspendDays} dia(s) e a denúncia será marcada como Suspenso.`}
+          confirmLabel="Suspender"
           danger
-          onConfirm={handleDelete}
+          onConfirm={() => handleModerate('SUSPEND')}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'ban' && (
+        <ConfirmModal
+          title="Banir usuário"
+          description="O usuário será banido permanentemente e a denúncia marcada como Banido. Esta ação não pode ser desfeita."
+          confirmLabel="Banir"
+          danger
+          onConfirm={() => handleModerate('BAN')}
           onCancel={() => setModal(null)}
         />
       )}
@@ -655,7 +728,6 @@ function AdminDashboard({ token, onLogout }: AdminDashboardProps) {
   }
 
   const pending = reports.filter((r) => r.status === 'PENDING').length
-  const reviewed = reports.filter((r) => r.status === 'REVIEWED').length
   const resolved = reports.filter((r) => r.status.startsWith('RESOLVED')).length
 
   if (view === 'detail' && selectedId) {
@@ -692,11 +764,10 @@ function AdminDashboard({ token, onLogout }: AdminDashboardProps) {
 
       <main className="flex-1 p-6 max-w-6xl mx-auto w-full space-y-6">
         {/* Metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <MetricCard label="Total" value={reports.length} />
           <MetricCard label="Pendentes" value={pending} accent />
-          <MetricCard label="Em revisão" value={reviewed} />
-          <MetricCard label="Resolvidos" value={resolved} />
+          <MetricCard label="Resolvidas" value={resolved} />
         </div>
 
         {/* Filters */}
